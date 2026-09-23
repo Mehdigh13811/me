@@ -1,0 +1,90 @@
+name: Deploy Telegram Portable on Windows Runner
+
+on:
+  workflow_dispatch: # امکان اجرای دستی
+
+jobs:
+  deploy:
+    runs-on: windows-latest # استفاده از آخرین نسخه ویندوز گیت‌هاب [citation:13]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Connect to Tailscale
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+        # این مرحله runner را به شبکه Tailscale شما متصل می‌کند [citation:4]
+
+      - name: Download and Extract Telegram Portable
+        shell: pwsh
+        run: |
+          # دانلود آخرین نسخه تلگرام پورتال (لینک نمونه، ممکن است نیاز به به‌روزرسانی داشته باشد)
+          $url = "https://telegram.org/dl/desktop/win64_portable"
+          $zipPath = "$env:TEMP\telegram_portable.zip"
+          $extractPath = "$env:TEMP\telegram_portable"
+          
+          Invoke-WebRequest -Uri $url -OutFile $zipPath
+          Expand-Archive -Path $zipPath -DestinationPath $extractPath -Force
+
+      - name: Copy Telegram to Program Files (x86)
+        shell: pwsh
+        run: |
+          # کپی کردن فایل‌ها به Program Files (x86) با دسترسی ادمین [citation:5][citation:16]
+          $source = "$env:TEMP\telegram_portable"
+          $dest = "${env:ProgramFiles(x86)}\Telegram Portable"
+          
+          if (-not (Test-Path $dest)) {
+            New-Item -ItemType Directory -Path $dest -Force
+          }
+          
+          Copy-Item -Path "$source\*" -Destination $dest -Recurse -Force
+          Write-Host "Telegram copied to $dest"
+
+      - name: Create Desktop Shortcut
+        shell: pwsh
+        run: |
+          # ساخت شورتکات در دسکتاپ کاربر جاری [citation:6]
+          $desktop = [Environment]::GetFolderPath("Desktop")
+          $shortcutPath = Join-Path $desktop "Telegram Portable.lnk"
+          $targetPath = "${env:ProgramFiles(x86)}\Telegram Portable\Telegram.exe"
+          
+          $WshShell = New-Object -ComObject WScript.Shell
+          $Shortcut = $WshShell.CreateShortcut($shortcutPath)
+          $Shortcut.TargetPath = $targetPath
+          # تنظیم پوشه کاری به محل نصب تا از tdata موجود استفاده کند [citation:11]
+          $Shortcut.WorkingDirectory = Split-Path $targetPath
+          $Shortcut.Save()
+          Write-Host "Shortcut created at $shortcutPath"
+
+      - name: Backup tdata Folder
+        shell: pwsh
+        run: |
+          # بکاپ گرفتن از پوشه tdata و آپلود به عنوان Artifact
+          $tdataPath = "${env:ProgramFiles(x86)}\Telegram Portable\tdata"
+          
+          if (Test-Path $tdataPath) {
+            # نام‌گذاری فایل بکاپ با تاریخ
+            $date = Get-Date -Format "yyyyMMdd-HHmmss"
+            $backupName = "tdata-backup-$date"
+            
+            # فشرده‌سازی پوشه tdata
+            Compress-Archive -Path $tdataPath -DestinationPath "$env:TEMP\$backupName.zip" -Force
+            
+            # آپلود به عنوان Artifact گیت‌هاب برای دانلود بعدی
+            # (این کار به صورت خودکار توسط اکشن زیر انجام می‌شود)
+            echo "BACKUP_FILE=$env:TEMP\$backupName.zip" >> $env:GITHUB_ENV
+          } else {
+            Write-Warning "tdata folder not found. No backup created."
+          }
+
+      - name: Upload tdata Backup as Artifact
+        uses: actions/upload-artifact@v4
+        if: env.BACKUP_FILE != ''
+        with:
+          name: telegram-tdata-backup
+          path: ${{ env.BACKUP_FILE }}
+          retention-days: 30 # مدت زمان نگهداری فایل بکاپ
