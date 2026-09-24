@@ -77,7 +77,7 @@ jobs:
               $Shortcut.Save()
           }
 
-      - name: Restore Telegram Backup from FTP
+      - name: Download Telegram Portable from FTP
         shell: powershell
         env:
           FTP_SERVER: ${{ secrets.FTP_SERVER }}
@@ -86,41 +86,49 @@ jobs:
         run: |
           $ErrorActionPreference = "Continue"
           $telegramDir = "C:\Telegram"
-          $zipPath = "$env:TEMP\telegram-backup.zip"
-          $ftpUrl = "ftp://$env:FTP_SERVER/telegram-backup.zip"
+          $zipPath = "$env:TEMP\td-portable-win-x64-7.2.9.zip"
+          $ftpUrl = "ftp://$env:FTP_SERVER/td-portable-win-x64-7.2.9.zip"
 
-          Write-Host "Attempting to download backup from FTP..."
-          curl.exe -s -S --connect-timeout 15 --max-time 300 --user "$env:FTP_USERNAME`:$env:FTP_PASSWORD" -o $zipPath $ftpUrl
+          Write-Host "Downloading Telegram Portable from FTP..."
+          curl.exe -s -S --connect-timeout 15 --max-time 600 --user "$env:FTP_USERNAME`:$env:FTP_PASSWORD" -o $zipPath $ftpUrl
 
           if ((Test-Path $zipPath) -and ((Get-Item $zipPath).Length -gt 0)) {
-              Write-Host "Backup found. Extracting..."
+              Write-Host "Telegram package downloaded. Extracting..."
               if (Test-Path $telegramDir) { Remove-Item -Path $telegramDir -Recurse -Force }
               New-Item -Path $telegramDir -ItemType Directory -Force | Out-Null
               Expand-Archive -Path $zipPath -DestinationPath $telegramDir -Force
               Remove-Item -Path $zipPath -Force
-              Write-Host "Telegram restored from FTP backup."
-          } else {
-              Write-Host "No existing backup found on FTP. Will download fresh Telegram."
-              if (Test-Path $zipPath) { Remove-Item -Path $zipPath -Force }
-          }
-
-      - name: Setup Telegram Portable
-        shell: powershell
-        run: |
-          $ErrorActionPreference = "Stop"
-          $telegramDir = "C:\Telegram"
-
-          if (-not (Test-Path "$telegramDir\Telegram.exe")) {
-              Write-Host "Downloading fresh Telegram Portable..."
-              $url = "https://telegram.org/dl/desktop/win64_portable"
-              $out = "$env:TEMP\telegram.zip"
-              Invoke-WebRequest -Uri $url -OutFile $out
-              if (-not (Test-Path $telegramDir)) { New-Item -Path $telegramDir -ItemType Directory -Force }
-              Expand-Archive -Path $out -DestinationPath $telegramDir -Force
-              Remove-Item -Path $out -Force
               Write-Host "Telegram extracted to $telegramDir"
           } else {
-              Write-Host "Telegram already present."
+              Write-Host "::error::Failed to download Telegram package from FTP."
+              exit 1
+          }
+
+      - name: Restore Tdata from FTP if Exists
+        shell: powershell
+        env:
+          FTP_SERVER: ${{ secrets.FTP_SERVER }}
+          FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
+          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+        run: |
+          $ErrorActionPreference = "Continue"
+          $telegramDir = "C:\Telegram"
+          $tdataDir = "$telegramDir\tdata"
+          $tdataZip = "$env:TEMP\tdata-backup.zip"
+          $ftpUrl = "ftp://$env:FTP_SERVER/tdata-backup.zip"
+
+          Write-Host "Checking for Tdata backup on FTP..."
+          curl.exe -s -S --connect-timeout 15 --max-time 300 --user "$env:FTP_USERNAME`:$env:FTP_PASSWORD" -o $tdataZip $ftpUrl
+
+          if ((Test-Path $tdataZip) -and ((Get-Item $tdataZip).Length -gt 1000)) {
+              Write-Host "Tdata backup found. Restoring..."
+              if (Test-Path $tdataDir) { Remove-Item -Path $tdataDir -Recurse -Force }
+              Expand-Archive -Path $tdataZip -DestinationPath $tdataDir -Force
+              Remove-Item -Path $tdataZip -Force
+              Write-Host "Tdata restored successfully. Login will be preserved."
+          } else {
+              Write-Host "No Tdata backup found. Fresh Telegram will start without login."
+              if (Test-Path $tdataZip) { Remove-Item -Path $tdataZip -Force }
           }
 
       - name: Create Telegram Desktop Shortcut
@@ -177,7 +185,7 @@ jobs:
           Write-Host "================"
           Start-Sleep -Seconds 300
 
-      - name: Backup Telegram to FTP
+      - name: Backup Tdata to FTP
         if: always()
         shell: powershell
         env:
@@ -186,11 +194,11 @@ jobs:
           FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
         run: |
           $ErrorActionPreference = "Continue"
-          $telegramDir = "C:\Telegram"
-          $zipPath = "$env:TEMP\telegram-backup.zip"
+          $tdataDir = "C:\Telegram\tdata"
+          $zipPath = "$env:TEMP\tdata-backup.zip"
 
-          if (-not (Test-Path $telegramDir)) {
-              Write-Host "No Telegram folder found. Skipping backup."
+          if (-not (Test-Path $tdataDir)) {
+              Write-Host "No Tdata folder found. Skipping backup."
               exit 0
           }
 
@@ -199,18 +207,18 @@ jobs:
 
           if (Test-Path $zipPath) { Remove-Item -Path $zipPath -Force }
 
-          Write-Host "Compressing Telegram folder..."
-          Compress-Archive -Path "$telegramDir\*" -DestinationPath $zipPath -Force
+          Write-Host "Compressing Tdata folder..."
+          Compress-Archive -Path "$tdataDir\*" -DestinationPath $zipPath -Force
 
           $zipSizeMB = [math]::Round((Get-Item $zipPath).Length / 1MB, 2)
-          Write-Host "Backup size: $zipSizeMB MB"
+          Write-Host "Tdata backup size: $zipSizeMB MB"
 
-          $ftpUrl = "ftp://$env:FTP_SERVER/telegram-backup.zip"
-          Write-Host "Uploading to FTP (overwriting existing file)..."
+          $ftpUrl = "ftp://$env:FTP_SERVER/tdata-backup.zip"
+          Write-Host "Uploading Tdata backup to FTP (overwriting existing file)..."
           curl.exe -s -S --connect-timeout 15 --max-time 600 --user "$env:FTP_USERNAME`:$env:FTP_PASSWORD" -T $zipPath $ftpUrl
 
           if ($LASTEXITCODE -eq 0) {
-              Write-Host "Backup uploaded successfully. File overwritten on FTP."
+              Write-Host "Tdata backup uploaded successfully."
           } else {
               Write-Host "FTP upload failed with exit code $LASTEXITCODE"
           }
