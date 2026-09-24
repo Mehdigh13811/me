@@ -6,7 +6,7 @@ on:
 jobs:
   windows-rdp:
     runs-on: windows-latest
-    timeout-minutes: 3
+    timeout-minutes: 5
 
     steps:
       - name: Checkout
@@ -24,36 +24,93 @@ jobs:
         run: |
           net user runneradmin "WindowsRDP#2025"
 
-      - name: Customize Desktop Icons
+      - name: Customize Desktop Icons via Registry
         shell: powershell
         run: |
-          # مخفی کردن تمام آیکون‌های دسکتاپ
-          Set-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced' -Name "HideIcons" -Value 1
+          $ErrorActionPreference = "Stop"
 
-          # فقط This PC و Recycle Bin رو نمایش بده
-          Set-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\HideDesktopIcons\NewStartPanel' -Name "{20D04FE0-3AEA-1069-A2D8-08002B30309D}" -Value 0
-          Set-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\HideDesktopIcons\NewStartPanel' -Name "{645FF040-5081-101B-9F08-00AA002F954E}" -Value 0
+          # مسیر رجیستری برای کنترل آیکون‌های دسکتاپ
+          $key = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\HideDesktopIcons\NewStartPanel'
 
-          # ساخت شورتکات Google Chrome روی دسکتاپ
-          $WshShell = New-Object -ComObject WScript.Shell
-          $Shortcut = $WshShell.CreateShortcut("$env:USERPROFILE\Desktop\Google Chrome.lnk")
-          $Shortcut.TargetPath = "C:\Program Files\Google\Chrome\Application\chrome.exe"
-          $Shortcut.Save()
+          # اطمینان از وجود کلید
+          if (-not (Test-Path $key)) {
+              New-Item -Path $key -Force | Out-Null
+          }
 
-          # انتقال Recycle Bin به گوشه سمت راست پایین
-          # (تنظیم موقعیت آیکون‌ها از طریق رجیستری ممکن نیست، پس از روش جایگزین استفاده می‌کنیم)
-          $desktopPath = "$env:USERPROFILE\Desktop"
-          $recycleBinPath = "$env:USERPROFILE\Desktop\Recycle Bin"
-          # ایجاد یک شورتکات به Recycle Bin
-          $WshShell = New-Object -ComObject WScript.Shell
-          $Shortcut = $WshShell.CreateShortcut("$desktopPath\Recycle Bin.lnk")
-          $Shortcut.TargetPath = "explorer.exe"
-          $Shortcut.Arguments = "shell:RecycleBinFolder"
-          $Shortcut.Save()
+          # --- آیکون‌های سیستمی که می‌خوایم نمایش داده بشن (مقدار 0) ---
 
-          # راه‌اندازی مجدد Explorer برای اعمال تغییرات
-          Stop-Process -Name explorer -Force
-          Start-Sleep -Seconds 2
+          # This PC (Computer)
+          Set-ItemProperty -Path $key -Name "{20D04FE0-3AEA-1069-A2D8-08002B30309D}" -Value 0 -Type DWord
+
+          # Recycle Bin
+          Set-ItemProperty -Path $key -Name "{645FF040-5081-101B-9F08-00AA002F954E}" -Value 0 -Type DWord
+
+          # --- آیکون‌های سیستمی که می‌خوایم مخفی بشن (مقدار 1) ---
+
+          # User's Files
+          Set-ItemProperty -Path $key -Name "{59031a47-3f72-44a7-89c5-5595fe6b30ee}" -Value 1 -Type DWord
+
+          # Network
+          Set-ItemProperty -Path $key -Name "{F02C1A0D-BE21-4350-88B0-7367FC96EF3C}" -Value 1 -Type DWord
+
+          # Control Panel
+          Set-ItemProperty -Path $key -Name "{5399E694-6CE5-4D6C-8FCE-1D8870FDCBA0}" -Value 1 -Type DWord
+
+          # اطمینان از اینکه HideIcons غیرفعاله (چون اگه فعال باشه همه آیکون‌ها مخفی می‌شن)
+          Set-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced' -Name "HideIcons" -Value 0 -Type DWord
+
+          Write-Host "Registry icon settings applied."
+
+      - name: Remove Unwanted Desktop Shortcuts
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $desktop = "$env:USERPROFILE\Desktop"
+          $publicDesktop = "C:\Users\Public\Desktop"
+
+          # لیست شورتکات‌هایی که باید حذف بشن
+          $unwanted = @(
+              "Firefox.lnk",
+              "Microsoft Edge.lnk",
+              "R 4.6.1.lnk",
+              "Unity Hub.lnk",
+              "Google Chrome.lnk"
+          )
+
+          foreach ($folder in @($desktop, $publicDesktop)) {
+              if (Test-Path $folder) {
+                  foreach ($item in $unwanted) {
+                      $path = Join-Path $folder $item
+                      if (Test-Path $path) {
+                          Remove-Item -Path $path -Force
+                          Write-Host "Removed: $path"
+                      }
+                  }
+              }
+          }
+
+          # ساخت شورتکات جدید Google Chrome روی دسکتاپ
+          $chromePath = "C:\Program Files\Google\Chrome\Application\chrome.exe"
+          if (Test-Path $chromePath) {
+              $WshShell = New-Object -ComObject WScript.Shell
+              $Shortcut = $WshShell.CreateShortcut("$desktop\Google Chrome.lnk")
+              $Shortcut.TargetPath = $chromePath
+              $Shortcut.Save()
+              Write-Host "Chrome shortcut created."
+          } else {
+              Write-Host "Chrome not found at $chromePath"
+          }
+
+      - name: Restart Explorer to Apply Changes
+        shell: powershell
+        run: |
+          Stop-Process -Name explorer -Force -ErrorAction SilentlyContinue
+          Start-Sleep -Seconds 3
+          # مطمئن شو Explorer دوباره اجرا شده
+          if (-not (Get-Process -Name explorer -ErrorAction SilentlyContinue)) {
+              Start-Process explorer.exe
+          }
 
       - name: Install Tailscale
         shell: powershell
@@ -84,6 +141,5 @@ jobs:
           Write-Host "Password  : WindowsRDP#2025"
           Write-Host "================"
           Write-Host "Connect via Remote Desktop client using the IP above."
-          Write-Host "Session will terminate automatically after 3 minutes."
           Write-Host "================"
-          Start-Sleep -Seconds 180
+          Start-Sleep -Seconds 240
