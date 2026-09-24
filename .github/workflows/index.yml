@@ -1,0 +1,79 @@
+name: Tailscale Windows Server (Test 5min)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  windows-server:
+    runs-on: windows-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Tailscale
+        uses: tailscale/github-action@v2
+        with:
+          authkey: ${{ secrets.key }}
+          tags: tag:ci
+          version: latest
+
+      - name: Verify Tailscale connection
+        run: |
+          tailscale status
+          tailscale ip -4
+        shell: pwsh
+
+      - name: Show Windows Info
+        run: |
+          Get-ComputerInfo | Select-Object WindowsProductName, WindowsVersion
+        shell: pwsh
+
+      - name: Enable Remote Desktop (RDP)
+        run: |
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
+          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0
+        shell: pwsh
+
+      - name: Create Admin User
+        run: |
+          $password = ConvertTo-SecureString "P@ssw0rd123456!" -AsPlainText -Force
+          New-LocalUser -Name "tailadmin" -Password $password -FullName "Tailscale Admin" -Description "Remote Admin"
+          Add-LocalGroupMember -Group "Administrators" -Member "tailadmin"
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "tailadmin"
+        shell: pwsh
+
+      - name: Install SSH Server (OpenSSH)
+        run: |
+          Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
+          Start-Service sshd
+          Set-Service -Name sshd -StartupType 'Automatic'
+          New-NetFirewallRule -Name sshd -DisplayName 'OpenSSH Server (sshd)' -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 22
+        shell: pwsh
+
+      - name: Get Tailscale IP & Show Credentials
+        run: |
+          $ip = tailscale ip -4
+          Write-Host "========================================"
+          Write-Host " Tailscale IP : $ip"
+          Write-Host " RDP          : $ip:3389"
+          Write-Host " SSH          : ssh tailadmin@$ip"
+          Write-Host " User         : tailadmin"
+          Write-Host " Password     : P@ssw0rd123456!"
+          Write-Host "========================================"
+        shell: pwsh
+
+      - name: Keep Alive (5 minutes)
+        run: |
+          Write-Host "Server will stay alive for 5 minutes..."
+          $endTime = (Get-Date).AddMinutes(5)
+          
+          while ((Get-Date) -lt $endTime) {
+            $remaining = [math]::Round(($endTime - (Get-Date)).TotalSeconds)
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Remaining: $remaining seconds"
+            Start-Sleep -Seconds 30
+          }
+          Write-Host "Time's up. Shutting down."
+        shell: pwsh
+        timeout-minutes: 6
