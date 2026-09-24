@@ -24,6 +24,37 @@ jobs:
         run: |
           net user runneradmin "WindowsRDP#2025"
 
+      - name: Customize Desktop Icons
+        shell: powershell
+        run: |
+          # مخفی کردن تمام آیکون‌های دسکتاپ
+          Set-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced' -Name "HideIcons" -Value 1
+
+          # فقط This PC و Recycle Bin رو نمایش بده
+          Set-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\HideDesktopIcons\NewStartPanel' -Name "{20D04FE0-3AEA-1069-A2D8-08002B30309D}" -Value 0
+          Set-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\HideDesktopIcons\NewStartPanel' -Name "{645FF040-5081-101B-9F08-00AA002F954E}" -Value 0
+
+          # ساخت شورتکات Google Chrome روی دسکتاپ
+          $WshShell = New-Object -ComObject WScript.Shell
+          $Shortcut = $WshShell.CreateShortcut("$env:USERPROFILE\Desktop\Google Chrome.lnk")
+          $Shortcut.TargetPath = "C:\Program Files\Google\Chrome\Application\chrome.exe"
+          $Shortcut.Save()
+
+          # انتقال Recycle Bin به گوشه سمت راست پایین
+          # (تنظیم موقعیت آیکون‌ها از طریق رجیستری ممکن نیست، پس از روش جایگزین استفاده می‌کنیم)
+          $desktopPath = "$env:USERPROFILE\Desktop"
+          $recycleBinPath = "$env:USERPROFILE\Desktop\Recycle Bin"
+          # ایجاد یک شورتکات به Recycle Bin
+          $WshShell = New-Object -ComObject WScript.Shell
+          $Shortcut = $WshShell.CreateShortcut("$desktopPath\Recycle Bin.lnk")
+          $Shortcut.TargetPath = "explorer.exe"
+          $Shortcut.Arguments = "shell:RecycleBinFolder"
+          $Shortcut.Save()
+
+          # راه‌اندازی مجدد Explorer برای اعمال تغییرات
+          Stop-Process -Name explorer -Force
+          Start-Sleep -Seconds 2
+
       - name: Install Tailscale
         shell: powershell
         run: |
@@ -55,6 +86,4 @@ jobs:
           Write-Host "Connect via Remote Desktop client using the IP above."
           Write-Host "Session will terminate automatically after 3 minutes."
           Write-Host "================"
-
-          # زنده نگه داشتن سشن تا پایان تایم‌اوت
           Start-Sleep -Seconds 180
