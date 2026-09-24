@@ -6,11 +6,36 @@ on:
 jobs:
   windows-rdp:
     runs-on: windows-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Test FTP Connection
+        shell: powershell
+        env:
+          FTP_SERVER: ${{ secrets.FTP_SERVER }}
+          FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
+          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $ftpScript = @"
+open $env:FTP_SERVER
+$env:FTP_USERNAME
+$env:FTP_PASSWORD
+bye
+"@
+          $scriptPath = "$env:TEMP\ftp-test.txt"
+          $ftpScript | Out-File -FilePath $scriptPath -Encoding ASCII
+          $result = ftp -s:$scriptPath 2>&1 | Out-String
+          Write-Host $result
+          Remove-Item -Path $scriptPath -Force -ErrorAction SilentlyContinue
+          if ($result -match "530" -or $result -match "Login failed" -or $result -match "Connection refused" -or $result -match "Could not resolve" -or $result -match "Connection timed out") {
+              Write-Host "::error::FTP connection failed. Cancelling workflow."
+              exit 1
+          }
+          Write-Host "FTP connection successful."
 
       - name: Enable Remote Desktop & Configure Firewall
         shell: powershell
@@ -28,78 +53,107 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
-
-          # مسیر رجیستری برای کنترل آیکون‌های دسکتاپ
           $key = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\HideDesktopIcons\NewStartPanel'
-
-          # اطمینان از وجود کلید
-          if (-not (Test-Path $key)) {
-              New-Item -Path $key -Force | Out-Null
-          }
-
-          # --- آیکون‌های سیستمی که می‌خوایم نمایش داده بشن (مقدار 0) ---
-
-          # This PC (Computer)
+          if (-not (Test-Path $key)) { New-Item -Path $key -Force | Out-Null }
           Set-ItemProperty -Path $key -Name "{20D04FE0-3AEA-1069-A2D8-08002B30309D}" -Value 0 -Type DWord
-
-          # Recycle Bin
           Set-ItemProperty -Path $key -Name "{645FF040-5081-101B-9F08-00AA002F954E}" -Value 0 -Type DWord
-
-          # --- آیکون‌های سیستمی که می‌خوایم مخفی بشن (مقدار 1) ---
-
-          # User's Files
           Set-ItemProperty -Path $key -Name "{59031a47-3f72-44a7-89c5-5595fe6b30ee}" -Value 1 -Type DWord
-
-          # Network
           Set-ItemProperty -Path $key -Name "{F02C1A0D-BE21-4350-88B0-7367FC96EF3C}" -Value 1 -Type DWord
-
-          # Control Panel
           Set-ItemProperty -Path $key -Name "{5399E694-6CE5-4D6C-8FCE-1D8870FDCBA0}" -Value 1 -Type DWord
-
-          # اطمینان از اینکه HideIcons غیرفعاله (چون اگه فعال باشه همه آیکون‌ها مخفی می‌شن)
           Set-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced' -Name "HideIcons" -Value 0 -Type DWord
-
-          Write-Host "Registry icon settings applied."
 
       - name: Remove Unwanted Desktop Shortcuts
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
-
           $desktop = "$env:USERPROFILE\Desktop"
           $publicDesktop = "C:\Users\Public\Desktop"
-
-          # لیست شورتکات‌هایی که باید حذف بشن
-          $unwanted = @(
-              "Firefox.lnk",
-              "Microsoft Edge.lnk",
-              "R 4.6.1.lnk",
-              "Unity Hub.lnk",
-              "Google Chrome.lnk"
-          )
-
+          $unwanted = @("Firefox.lnk","Microsoft Edge.lnk","R 4.6.1.lnk","Unity Hub.lnk","Google Chrome.lnk")
           foreach ($folder in @($desktop, $publicDesktop)) {
               if (Test-Path $folder) {
                   foreach ($item in $unwanted) {
                       $path = Join-Path $folder $item
-                      if (Test-Path $path) {
-                          Remove-Item -Path $path -Force
-                          Write-Host "Removed: $path"
-                      }
+                      if (Test-Path $path) { Remove-Item -Path $path -Force }
                   }
               }
           }
-
-          # ساخت شورتکات جدید Google Chrome روی دسکتاپ
           $chromePath = "C:\Program Files\Google\Chrome\Application\chrome.exe"
           if (Test-Path $chromePath) {
               $WshShell = New-Object -ComObject WScript.Shell
               $Shortcut = $WshShell.CreateShortcut("$desktop\Google Chrome.lnk")
               $Shortcut.TargetPath = $chromePath
               $Shortcut.Save()
-              Write-Host "Chrome shortcut created."
+          }
+
+      - name: Restore Telegram Backup from FTP
+        shell: powershell
+        env:
+          FTP_SERVER: ${{ secrets.FTP_SERVER }}
+          FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
+          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+        run: |
+          $ErrorActionPreference = "Continue"
+          $telegramDir = "C:\Telegram"
+          $zipPath = "$env:TEMP\telegram-backup.zip"
+
+          $ftpScript = @"
+open $env:FTP_SERVER
+$env:FTP_USERNAME
+$env:FTP_PASSWORD
+binary
+lcd $env:TEMP
+get telegram-backup.zip
+bye
+"@
+          $scriptPath = "$env:TEMP\ftp-download.txt"
+          $ftpScript | Out-File -FilePath $scriptPath -Encoding ASCII
+
+          $result = ftp -s:$scriptPath 2>&1
+          Write-Host $result
+
+          if (Test-Path $zipPath) {
+              Write-Host "Backup found. Extracting..."
+              if (Test-Path $telegramDir) { Remove-Item -Path $telegramDir -Recurse -Force }
+              New-Item -Path $telegramDir -ItemType Directory -Force | Out-Null
+              Expand-Archive -Path $zipPath -DestinationPath $telegramDir -Force
+              Remove-Item -Path $zipPath -Force
+              Write-Host "Telegram restored from FTP backup."
           } else {
-              Write-Host "Chrome not found at $chromePath"
+              Write-Host "No existing backup found on FTP."
+          }
+
+      - name: Setup Telegram Portable
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $telegramDir = "C:\Telegram"
+
+          if (-not (Test-Path "$telegramDir\Telegram.exe")) {
+              Write-Host "Downloading fresh Telegram Portable..."
+              $url = "https://telegram.org/dl/desktop/win64_portable"
+              $out = "$env:TEMP\telegram.zip"
+              Invoke-WebRequest -Uri $url -OutFile $out
+              if (-not (Test-Path $telegramDir)) { New-Item -Path $telegramDir -ItemType Directory -Force }
+              Expand-Archive -Path $out -DestinationPath $telegramDir -Force
+              Remove-Item -Path $out -Force
+              Write-Host "Telegram extracted to $telegramDir"
+          } else {
+              Write-Host "Telegram already present."
+          }
+
+      - name: Create Telegram Desktop Shortcut
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $desktop = "$env:USERPROFILE\Desktop"
+          $telegramExe = "C:\Telegram\Telegram.exe"
+          if (Test-Path $telegramExe) {
+              $WshShell = New-Object -ComObject WScript.Shell
+              $Shortcut = $WshShell.CreateShortcut("$desktop\Telegram.lnk")
+              $Shortcut.TargetPath = $telegramExe
+              $Shortcut.WorkingDirectory = "C:\Telegram"
+              $Shortcut.Save()
+              Write-Host "Telegram shortcut created."
           }
 
       - name: Restart Explorer to Apply Changes
@@ -107,10 +161,7 @@ jobs:
         run: |
           Stop-Process -Name explorer -Force -ErrorAction SilentlyContinue
           Start-Sleep -Seconds 3
-          # مطمئن شو Explorer دوباره اجرا شده
-          if (-not (Get-Process -Name explorer -ErrorAction SilentlyContinue)) {
-              Start-Process explorer.exe
-          }
+          if (-not (Get-Process -Name explorer -ErrorAction SilentlyContinue)) { Start-Process explorer.exe }
 
       - name: Install Tailscale
         shell: powershell
@@ -140,6 +191,56 @@ jobs:
           Write-Host "Username  : runneradmin"
           Write-Host "Password  : WindowsRDP#2025"
           Write-Host "================"
-          Write-Host "Connect via Remote Desktop client using the IP above."
-          Write-Host "================"
-          Start-Sleep -Seconds 240
+          Start-Sleep -Seconds 300
+
+      - name: Backup Telegram to FTP (Overwrite)
+        if: always()
+        shell: powershell
+        env:
+          FTP_SERVER: ${{ secrets.FTP_SERVER }}
+          FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
+          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+        run: |
+          $ErrorActionPreference = "Continue"
+          $telegramDir = "C:\Telegram"
+          $zipPath = "$env:TEMP\telegram-backup.zip"
+
+          if (-not (Test-Path $telegramDir)) {
+              Write-Host "No Telegram folder found. Skipping backup."
+              exit 0
+          }
+
+          Get-Process -Name "Telegram" -ErrorAction SilentlyContinue | Stop-Process -Force
+          Start-Sleep -Seconds 3
+
+          if (Test-Path $zipPath) { Remove-Item -Path $zipPath -Force }
+
+          Write-Host "Compressing Telegram folder..."
+          Compress-Archive -Path "$telegramDir\*" -DestinationPath $zipPath -Force
+
+          $zipSizeMB = [math]::Round((Get-Item $zipPath).Length / 1MB, 2)
+          Write-Host "Backup size: $zipSizeMB MB"
+
+          $ftpScript = @"
+open $env:FTP_SERVER
+$env:FTP_USERNAME
+$env:FTP_PASSWORD
+binary
+lcd $env:TEMP
+put telegram-backup.zip
+bye
+"@
+          $scriptPath = "$env:TEMP\ftp-upload.txt"
+          $ftpScript | Out-File -FilePath $scriptPath -Encoding ASCII
+
+          Write-Host "Uploading to FTP (overwriting existing file)..."
+          $result = ftp -s:$scriptPath 2>&1
+          Write-Host $result
+
+          if ($LASTEXITCODE -eq 0) {
+              Write-Host "Backup uploaded successfully."
+          } else {
+              Write-Host "FTP upload may have failed. Exit code: $LASTEXITCODE"
+          }
+
+          Remove-Item -Path $scriptPath -Force -ErrorAction SilentlyContinue
