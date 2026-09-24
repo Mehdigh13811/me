@@ -19,20 +19,12 @@ jobs:
           FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
           FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
         run: |
-          $ErrorActionPreference = "Stop"
-          $ftpScript = @"
-open $env:FTP_SERVER
-$env:FTP_USERNAME
-$env:FTP_PASSWORD
-bye
-"@
-          $scriptPath = "$env:TEMP\ftp-test.txt"
-          $ftpScript | Out-File -FilePath $scriptPath -Encoding ASCII
-          $result = ftp -s:$scriptPath 2>&1 | Out-String
-          Write-Host $result
-          Remove-Item -Path $scriptPath -Force -ErrorAction SilentlyContinue
-          if ($result -match "530" -or $result -match "Login failed" -or $result -match "Connection refused" -or $result -match "Could not resolve" -or $result -match "Connection timed out") {
-              Write-Host "::error::FTP connection failed. Cancelling workflow."
+          $ErrorActionPreference = "Continue"
+          $ftpUrl = "ftp://$env:FTP_SERVER/"
+          $output = curl.exe -s -S --connect-timeout 15 --max-time 30 --user "$env:FTP_USERNAME`:$env:FTP_PASSWORD" $ftpUrl 2>&1 | Out-String
+          Write-Host "FTP Test Output: $output"
+          if ($LASTEXITCODE -ne 0) {
+              Write-Host "::error::FTP connection failed with exit code $LASTEXITCODE. Cancelling workflow."
               exit 1
           }
           Write-Host "FTP connection successful."
@@ -95,23 +87,12 @@ bye
           $ErrorActionPreference = "Continue"
           $telegramDir = "C:\Telegram"
           $zipPath = "$env:TEMP\telegram-backup.zip"
+          $ftpUrl = "ftp://$env:FTP_SERVER/telegram-backup.zip"
 
-          $ftpScript = @"
-open $env:FTP_SERVER
-$env:FTP_USERNAME
-$env:FTP_PASSWORD
-binary
-lcd $env:TEMP
-get telegram-backup.zip
-bye
-"@
-          $scriptPath = "$env:TEMP\ftp-download.txt"
-          $ftpScript | Out-File -FilePath $scriptPath -Encoding ASCII
+          Write-Host "Attempting to download backup from FTP..."
+          curl.exe -s -S --connect-timeout 15 --max-time 300 --user "$env:FTP_USERNAME`:$env:FTP_PASSWORD" -o $zipPath $ftpUrl
 
-          $result = ftp -s:$scriptPath 2>&1
-          Write-Host $result
-
-          if (Test-Path $zipPath) {
+          if ((Test-Path $zipPath) -and ((Get-Item $zipPath).Length -gt 0)) {
               Write-Host "Backup found. Extracting..."
               if (Test-Path $telegramDir) { Remove-Item -Path $telegramDir -Recurse -Force }
               New-Item -Path $telegramDir -ItemType Directory -Force | Out-Null
@@ -119,7 +100,8 @@ bye
               Remove-Item -Path $zipPath -Force
               Write-Host "Telegram restored from FTP backup."
           } else {
-              Write-Host "No existing backup found on FTP."
+              Write-Host "No existing backup found on FTP. Will download fresh Telegram."
+              if (Test-Path $zipPath) { Remove-Item -Path $zipPath -Force }
           }
 
       - name: Setup Telegram Portable
@@ -191,9 +173,11 @@ bye
           Write-Host "Username  : runneradmin"
           Write-Host "Password  : WindowsRDP#2025"
           Write-Host "================"
+          Write-Host "Connect via Remote Desktop client using the IP above."
+          Write-Host "================"
           Start-Sleep -Seconds 300
 
-      - name: Backup Telegram to FTP (Overwrite)
+      - name: Backup Telegram to FTP
         if: always()
         shell: powershell
         env:
@@ -221,26 +205,14 @@ bye
           $zipSizeMB = [math]::Round((Get-Item $zipPath).Length / 1MB, 2)
           Write-Host "Backup size: $zipSizeMB MB"
 
-          $ftpScript = @"
-open $env:FTP_SERVER
-$env:FTP_USERNAME
-$env:FTP_PASSWORD
-binary
-lcd $env:TEMP
-put telegram-backup.zip
-bye
-"@
-          $scriptPath = "$env:TEMP\ftp-upload.txt"
-          $ftpScript | Out-File -FilePath $scriptPath -Encoding ASCII
-
+          $ftpUrl = "ftp://$env:FTP_SERVER/telegram-backup.zip"
           Write-Host "Uploading to FTP (overwriting existing file)..."
-          $result = ftp -s:$scriptPath 2>&1
-          Write-Host $result
+          curl.exe -s -S --connect-timeout 15 --max-time 600 --user "$env:FTP_USERNAME`:$env:FTP_PASSWORD" -T $zipPath $ftpUrl
 
           if ($LASTEXITCODE -eq 0) {
-              Write-Host "Backup uploaded successfully."
+              Write-Host "Backup uploaded successfully. File overwritten on FTP."
           } else {
-              Write-Host "FTP upload may have failed. Exit code: $LASTEXITCODE"
+              Write-Host "FTP upload failed with exit code $LASTEXITCODE"
           }
 
-          Remove-Item -Path $scriptPath -Force -ErrorAction SilentlyContinue
+          Remove-Item -Path $zipPath -Force -ErrorAction SilentlyContinue
