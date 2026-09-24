@@ -87,20 +87,21 @@ jobs:
           $ErrorActionPreference = "Continue"
           $telegramDir = "C:\Telegram"
           $zipPath = "$env:TEMP\td-portable-win-x64-7.2.9.zip"
-          $ftpUrl = "ftp://$env:FTP_SERVER/td-portable-win-x64-7.2.9.zip"
+          $ftpUrl = "ftp://$env:FTP_SERVER/public_html/td-portable-win-x64-7.2.9.zip"
 
           Write-Host "Downloading Telegram Portable from FTP..."
+          Write-Host "URL: $ftpUrl"
           curl.exe -s -S --connect-timeout 15 --max-time 600 --user "$env:FTP_USERNAME`:$env:FTP_PASSWORD" -o $zipPath $ftpUrl
 
-          if ((Test-Path $zipPath) -and ((Get-Item $zipPath).Length -gt 0)) {
-              Write-Host "Telegram package downloaded. Extracting..."
+          if ((Test-Path $zipPath) -and ((Get-Item $zipPath).Length -gt 1000000)) {
+              Write-Host "Telegram package downloaded. Size: $([math]::Round((Get-Item $zipPath).Length / 1MB, 2)) MB"
               if (Test-Path $telegramDir) { Remove-Item -Path $telegramDir -Recurse -Force }
               New-Item -Path $telegramDir -ItemType Directory -Force | Out-Null
               Expand-Archive -Path $zipPath -DestinationPath $telegramDir -Force
               Remove-Item -Path $zipPath -Force
               Write-Host "Telegram extracted to $telegramDir"
           } else {
-              Write-Host "::error::Failed to download Telegram package from FTP."
+              Write-Host "::error::Failed to download Telegram package from FTP. Check if file exists at /public_html/td-portable-win-x64-7.2.9.zip"
               exit 1
           }
 
@@ -115,7 +116,7 @@ jobs:
           $telegramDir = "C:\Telegram"
           $tdataDir = "$telegramDir\tdata"
           $tdataZip = "$env:TEMP\tdata-backup.zip"
-          $ftpUrl = "ftp://$env:FTP_SERVER/tdata-backup.zip"
+          $ftpUrl = "ftp://$env:FTP_SERVER/public_html/tdata-backup.zip"
 
           Write-Host "Checking for Tdata backup on FTP..."
           curl.exe -s -S --connect-timeout 15 --max-time 300 --user "$env:FTP_USERNAME`:$env:FTP_PASSWORD" -o $tdataZip $ftpUrl
@@ -213,8 +214,8 @@ jobs:
           $zipSizeMB = [math]::Round((Get-Item $zipPath).Length / 1MB, 2)
           Write-Host "Tdata backup size: $zipSizeMB MB"
 
-          $ftpUrl = "ftp://$env:FTP_SERVER/tdata-backup.zip"
-          Write-Host "Uploading Tdata backup to FTP (overwriting existing file)..."
+          $ftpUrl = "ftp://$env:FTP_SERVER/public_html/tdata-backup.zip"
+          Write-Host "Uploading Tdata backup to FTP..."
           curl.exe -s -S --connect-timeout 15 --max-time 600 --user "$env:FTP_USERNAME`:$env:FTP_PASSWORD" -T $zipPath $ftpUrl
 
           if ($LASTEXITCODE -eq 0) {
