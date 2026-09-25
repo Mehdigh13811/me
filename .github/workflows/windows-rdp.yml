@@ -77,43 +77,30 @@ jobs:
               $Shortcut.Save()
           }
 
-      - name: Download Telegram Portable via HTTP
+      - name: Download Telegram Portable from FTP
         shell: powershell
+        env:
+          FTP_SERVER: ${{ secrets.FTP_SERVER }}
+          FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
+          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
         run: |
           $ErrorActionPreference = "Continue"
           $telegramDir = "C:\Telegram"
-          $zipPath = "$env:TEMP\td-portable-win-x64-7.2.9.zip"
+          $zipPath = "$env:TEMP\tel.zip"
+          $ftpUrl = "ftp://$env:FTP_SERVER/public_html/tel.zip"
 
-          $urls = @(
-              "https://source-store.ir/td-portable-win-x64-7.2.9.zip",
-              "https://www.source-store.ir/td-portable-win-x64-7.2.9.zip",
-              "http://source-store.ir/td-portable-win-x64-7.2.9.zip"
-          )
+          Write-Host "Downloading Telegram from: $ftpUrl"
+          curl.exe -s -S --connect-timeout 15 --max-time 600 --user "$env:FTP_USERNAME`:$env:FTP_PASSWORD" -o $zipPath $ftpUrl
 
-          $downloaded = $false
-          foreach ($url in $urls) {
-              if ($downloaded) { break }
-              Write-Host "Trying: $url"
-              if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
-              curl.exe -s -L -S --connect-timeout 15 --max-time 600 -o $zipPath $url
-              if ((Test-Path $zipPath) -and ((Get-Item $zipPath).Length -gt 1000000)) {
-                  $sizeMB = [math]::Round((Get-Item $zipPath).Length / 1MB, 2)
-                  Write-Host "SUCCESS: Downloaded $sizeMB MB from $url"
-                  $downloaded = $true
-              } else {
-                  Write-Host "FAILED at this URL."
-              }
-          }
-
-          if ($downloaded) {
-              Write-Host "Extracting Telegram..."
+          if ((Test-Path $zipPath) -and ((Get-Item $zipPath).Length -gt 1000000)) {
+              Write-Host "Downloaded. Size: $([math]::Round((Get-Item $zipPath).Length / 1MB, 2)) MB"
               if (Test-Path $telegramDir) { Remove-Item -Path $telegramDir -Recurse -Force }
               New-Item -Path $telegramDir -ItemType Directory -Force | Out-Null
               Expand-Archive -Path $zipPath -DestinationPath $telegramDir -Force
               Remove-Item -Path $zipPath -Force
               Write-Host "Telegram extracted to $telegramDir"
           } else {
-              Write-Host "::error::Failed to download Telegram from all URLs."
+              Write-Host "::error::Failed to download tel.zip from /public_html/. Check FTP path and file name."
               exit 1
           }
 
@@ -138,7 +125,7 @@ jobs:
               if (Test-Path $tdataDir) { Remove-Item -Path $tdataDir -Recurse -Force }
               Expand-Archive -Path $tdataZip -DestinationPath $tdataDir -Force
               Remove-Item -Path $tdataZip -Force
-              Write-Host "Tdata restored. Login preserved."
+              Write-Host "Tdata restored successfully. Login will be preserved."
           } else {
               Write-Host "No Tdata backup found. Fresh Telegram will start."
               if (Test-Path $tdataZip) { Remove-Item -Path $tdataZip -Force }
@@ -193,8 +180,6 @@ jobs:
           Write-Host "IP Address: $tsIP"
           Write-Host "Username  : runneradmin"
           Write-Host "Password  : WindowsRDP#2025"
-          Write-Host "================"
-          Write-Host "Connect via Remote Desktop client using the IP above."
           Write-Host "================"
           Start-Sleep -Seconds 300
 
