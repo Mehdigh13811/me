@@ -137,15 +137,37 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
-          $desktop = "$env:USERPROFILE\Desktop"
+          $userDesktop = "$env:USERPROFILE\Desktop"
+          $publicDesktop = "C:\Users\Public\Desktop"
           $telegramExe = "C:\Telegram\Telegram.exe"
+
           if (Test-Path $telegramExe) {
               $WshShell = New-Object -ComObject WScript.Shell
-              $Shortcut = $WshShell.CreateShortcut("$desktop\Telegram.lnk")
+
+              $Shortcut = $WshShell.CreateShortcut("$userDesktop\Telegram.lnk")
               $Shortcut.TargetPath = $telegramExe
               $Shortcut.WorkingDirectory = "C:\Telegram"
               $Shortcut.Save()
-              Write-Host "Telegram shortcut created."
+
+              $Shortcut2 = $WshShell.CreateShortcut("$publicDesktop\Telegram.lnk")
+              $Shortcut2.TargetPath = $telegramExe
+              $Shortcut2.WorkingDirectory = "C:\Telegram"
+              $Shortcut2.Save()
+
+              Write-Host "Telegram shortcuts created on user desktop and public desktop."
+          } else {
+              Write-Host "::error::Telegram.exe not found at $telegramExe"
+              exit 1
+          }
+
+      - name: Verify Telegram Shortcut
+        shell: powershell
+        run: |
+          $shortcutPath = "$env:USERPROFILE\Desktop\Telegram.lnk"
+          if (Test-Path $shortcutPath) {
+              Write-Host "Shortcut verified at: $shortcutPath"
+          } else {
+              Write-Host "::warning::Shortcut not found at $shortcutPath"
           }
 
       - name: Restart Explorer to Apply Changes
@@ -182,6 +204,8 @@ jobs:
           Write-Host "IP Address: $tsIP"
           Write-Host "Username  : runneradmin"
           Write-Host "Password  : WindowsRDP#2025"
+          Write-Host "================"
+          Write-Host "Connect via Remote Desktop client using the IP above."
           Write-Host "================"
           Start-Sleep -Seconds 300
 
