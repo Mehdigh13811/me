@@ -261,10 +261,10 @@ jobs:
           Write-Host ""
           Write-Host $separator -ForegroundColor Cyan
           Write-Host "  Connect using Remote Desktop client with the IP above." -ForegroundColor Gray
-          Write-Host "  Session will remain active for 2 minutes (test mode)." -ForegroundColor Gray
+          Write-Host "  Session will remain active for 5 hours and 45 minutes." -ForegroundColor Gray
           Write-Host $separator -ForegroundColor Cyan
           Write-Host ""
-          Start-Sleep -Seconds 120
+          Start-Sleep -Seconds 20700
 
       - name: Backup Tdata to FTP
         if: always()
