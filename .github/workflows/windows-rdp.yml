@@ -104,6 +104,42 @@ jobs:
               exit 1
           }
 
+      - name: Find and Normalize Telegram Path
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $telegramDir = "C:\Telegram"
+
+          Write-Host "Listing contents of C:\Telegram:"
+          Get-ChildItem -Path $telegramDir -Recurse -Depth 2 | ForEach-Object { Write-Host $_.FullName }
+
+          $exe = Get-ChildItem -Path $telegramDir -Filter "Telegram.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+
+          if ($null -eq $exe) {
+              Write-Host "::error::Telegram.exe not found anywhere under C:\Telegram"
+              exit 1
+          }
+
+          Write-Host "Found Telegram.exe at: $($exe.FullName)"
+
+          $rootExe = Join-Path $telegramDir "Telegram.exe"
+          if ($exe.FullName -ne $rootExe) {
+              Write-Host "Moving all contents of $($exe.Directory.FullName) to $telegramDir"
+              Get-ChildItem -Path $exe.Directory.FullName -Force | ForEach-Object {
+                  $dest = Join-Path $telegramDir $_.Name
+                  if (Test-Path $dest) { Remove-Item -Path $dest -Recurse -Force }
+                  Move-Item -Path $_.FullName -Destination $dest -Force
+              }
+              Write-Host "Contents moved to $telegramDir"
+          }
+
+          if (Test-Path "$telegramDir\Telegram.exe") {
+              Write-Host "Telegram.exe is now at correct location: $telegramDir\Telegram.exe"
+          } else {
+              Write-Host "::error::Failed to place Telegram.exe at $telegramDir"
+              exit 1
+          }
+
       - name: Restore Tdata from FTP if Exists
         shell: powershell
         env:
