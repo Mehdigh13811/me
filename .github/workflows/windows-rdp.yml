@@ -169,28 +169,57 @@ jobs:
 
           exit 0
 
+      - name: Restore Desktop from FTP if Exists
+        shell: powershell
+        env:
+          FTP_SERVER: ${{ secrets.FTP_SERVER }}
+          FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
+          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+        run: |
+          $ErrorActionPreference = "Continue"
+          $desktopDir = "$env:USERPROFILE\Desktop"
+          $desktopZip = "$env:TEMP\desktop-backup.zip"
+          $ftpUrl = "ftp://$env:FTP_SERVER/desktop-backup.zip"
+
+          Write-Host "Checking for Desktop backup on FTP..."
+          curl.exe -s -S --connect-timeout 15 --max-time 300 --user "$env:FTP_USERNAME`:$env:FTP_PASSWORD" -o $desktopZip $ftpUrl 2>&1 | Out-Null
+
+          if ((Test-Path $desktopZip) -and ((Get-Item $desktopZip).Length -gt 100)) {
+              Write-Host "Desktop backup found. Restoring..."
+              $tempExtract = "$env:TEMP\desktop-restore"
+              if (Test-Path $tempExtract) { Remove-Item -Path $tempExtract -Recurse -Force }
+              New-Item -Path $tempExtract -ItemType Directory -Force | Out-Null
+              Expand-Archive -Path $desktopZip -DestinationPath $tempExtract -Force
+
+              Get-ChildItem -Path $tempExtract -Force | ForEach-Object {
+                  $dest = Join-Path $desktopDir $_.Name
+                  Move-Item -Path $_.FullName -Destination $dest -Force
+              }
+
+              Remove-Item -Path $tempExtract -Recurse -Force
+              Remove-Item -Path $desktopZip -Force
+              Write-Host "Desktop restored successfully."
+          } else {
+              Write-Host "No Desktop backup found. Continuing with default desktop."
+              if (Test-Path $desktopZip) { Remove-Item -Path $desktopZip -Force }
+          }
+
+          exit 0
+
       - name: Create Telegram Desktop Shortcut
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
-          $userDesktop = "$env:USERPROFILE\Desktop"
           $publicDesktop = "C:\Users\Public\Desktop"
           $telegramExe = "C:\Telegram\Telegram.exe"
 
           if (Test-Path $telegramExe) {
               $WshShell = New-Object -ComObject WScript.Shell
-
-              $Shortcut = $WshShell.CreateShortcut("$userDesktop\Telegram.lnk")
+              $Shortcut = $WshShell.CreateShortcut("$publicDesktop\Telegram.lnk")
               $Shortcut.TargetPath = $telegramExe
               $Shortcut.WorkingDirectory = "C:\Telegram"
               $Shortcut.Save()
-
-              $Shortcut2 = $WshShell.CreateShortcut("$publicDesktop\Telegram.lnk")
-              $Shortcut2.TargetPath = $telegramExe
-              $Shortcut2.WorkingDirectory = "C:\Telegram"
-              $Shortcut2.Save()
-
-              Write-Host "Telegram shortcuts created on user desktop and public desktop."
+              Write-Host "Telegram shortcut created on Public Desktop."
           } else {
               Write-Host "::error::Telegram.exe not found at $telegramExe"
               exit 1
@@ -199,7 +228,7 @@ jobs:
       - name: Verify Telegram Shortcut
         shell: powershell
         run: |
-          $shortcutPath = "$env:USERPROFILE\Desktop\Telegram.lnk"
+          $shortcutPath = "C:\Users\Public\Desktop\Telegram.lnk"
           if (Test-Path $shortcutPath) {
               Write-Host "Shortcut verified at: $shortcutPath"
           } else {
@@ -283,5 +312,64 @@ jobs:
               Write-Host "FTP upload failed with exit code $LASTEXITCODE"
           }
 
+          Remove-Item -Path $zipPath -Force -ErrorAction SilentlyContinue
+          exit 0
+
+      - name: Backup Desktop to FTP
+        if: always()
+        shell: powershell
+        env:
+          FTP_SERVER: ${{ secrets.FTP_SERVER }}
+          FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
+          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+        run: |
+          $ErrorActionPreference = "Continue"
+          $desktopDir = "$env:USERPROFILE\Desktop"
+          $publicDesktop = "C:\Users\Public\Desktop"
+          $stagingDir = "$env:TEMP\desktop-backup-staging"
+          $zipPath = "$env:TEMP\desktop-backup.zip"
+
+          if (-not (Test-Path $desktopDir)) {
+              Write-Host "No Desktop folder found. Skipping desktop backup."
+              exit 0
+          }
+
+          if (Test-Path $stagingDir) { Remove-Item -Path $stagingDir -Recurse -Force }
+          New-Item -Path $stagingDir -ItemType Directory -Force | Out-Null
+
+          Write-Host "Copying user desktop contents to staging..."
+          Get-ChildItem -Path $desktopDir -Force | ForEach-Object {
+              Copy-Item -Path $_.FullName -Destination $stagingDir -Recurse -Force
+          }
+
+          Write-Host "Copying public desktop contents to staging..."
+          if (Test-Path $publicDesktop) {
+              Get-ChildItem -Path $publicDesktop -Force | ForEach-Object {
+                  $dest = Join-Path $stagingDir $_.Name
+                  if (-not (Test-Path $dest)) {
+                      Copy-Item -Path $_.FullName -Destination $dest -Recurse -Force
+                  }
+              }
+          }
+
+          if (Test-Path $zipPath) { Remove-Item -Path $zipPath -Force }
+
+          Write-Host "Compressing desktop backup..."
+          Compress-Archive -Path "$stagingDir\*" -DestinationPath $zipPath -Force
+
+          $zipSizeMB = [math]::Round((Get-Item $zipPath).Length / 1MB, 2)
+          Write-Host "Desktop backup size: $zipSizeMB MB"
+
+          $ftpUrl = "ftp://$env:FTP_SERVER/desktop-backup.zip"
+          Write-Host "Uploading Desktop backup to FTP root..."
+          curl.exe -s -S --connect-timeout 15 --max-time 600 --user "$env:FTP_USERNAME`:$env:FTP_PASSWORD" -T $zipPath $ftpUrl
+
+          if ($LASTEXITCODE -eq 0) {
+              Write-Host "Desktop backup uploaded successfully to FTP root."
+          } else {
+              Write-Host "FTP upload failed with exit code $LASTEXITCODE"
+          }
+
+          Remove-Item -Path $stagingDir -Recurse -Force -ErrorAction SilentlyContinue
           Remove-Item -Path $zipPath -Force -ErrorAction SilentlyContinue
           exit 0
