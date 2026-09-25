@@ -20,6 +20,9 @@ jobs:
           FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
         run: |
           $ErrorActionPreference = "Continue"
+          Write-Host "FTP_SERVER value: $env:FTP_SERVER"
+          Write-Host "FTP_USERNAME value: $env:FTP_USERNAME"
+          Write-Host "Password length: $($env:FTP_PASSWORD.Length)"
           $ftpUrl = "ftp://$env:FTP_SERVER/"
           $output = curl.exe -s -S --connect-timeout 15 --max-time 30 --user "$env:FTP_USERNAME`:$env:FTP_PASSWORD" $ftpUrl 2>&1 | Out-String
           Write-Host "FTP Test Output: $output"
@@ -77,6 +80,79 @@ jobs:
               $Shortcut.Save()
           }
 
+      - name: Debug FTP Paths
+        shell: powershell
+        env:
+          FTP_SERVER: ${{ secrets.FTP_SERVER }}
+          FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
+          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+        run: |
+          $ErrorActionPreference = "Continue"
+
+          Write-Host "=========================================="
+          Write-Host "FTP DEBUG INFORMATION"
+          Write-Host "=========================================="
+          Write-Host "FTP_SERVER: $env:FTP_SERVER"
+          Write-Host "FTP_USERNAME: $env:FTP_USERNAME"
+          Write-Host "Password Length: $($env:FTP_PASSWORD.Length)"
+          Write-Host "=========================================="
+
+          Write-Host ""
+          Write-Host "=== 1. Listing root directory ==="
+          curl.exe -s -S --user "$env:FTP_USERNAME`:$env:FTP_PASSWORD" "ftp://$env:FTP_SERVER/"
+          Write-Host "Exit code: $LASTEXITCODE"
+
+          Write-Host ""
+          Write-Host "=== 2. Listing /public_html ==="
+          curl.exe -s -S --user "$env:FTP_USERNAME`:$env:FTP_PASSWORD" "ftp://$env:FTP_SERVER/public_html/"
+          Write-Host "Exit code: $LASTEXITCODE"
+
+          Write-Host ""
+          Write-Host "=== 3. Listing /public_html/downloads (if exists) ==="
+          curl.exe -s -S --user "$env:FTP_USERNAME`:$env:FTP_PASSWORD" "ftp://$env:FTP_SERVER/public_html/downloads/"
+          Write-Host "Exit code: $LASTEXITCODE"
+
+          Write-Host ""
+          Write-Host "=== 4. Trying to download file from root ==="
+          $testPath1 = "$env:TEMP\test-download1.zip"
+          if (Test-Path $testPath1) { Remove-Item $testPath1 -Force }
+          curl.exe -s -S --user "$env:FTP_USERNAME`:$env:FTP_PASSWORD" "ftp://$env:FTP_SERVER/td-portable-win-x64-7.2.9.zip" -o $testPath1
+          if ((Test-Path $testPath1) -and ((Get-Item $testPath1).Length -gt 1000)) {
+              Write-Host "SUCCESS: File found at root! Size: $((Get-Item $testPath1).Length) bytes"
+          } else {
+              Write-Host "FAILED: File not found at root."
+          }
+          Remove-Item $testPath1 -Force -ErrorAction SilentlyContinue
+
+          Write-Host ""
+          Write-Host "=== 5. Trying to download file from /public_html ==="
+          $testPath2 = "$env:TEMP\test-download2.zip"
+          if (Test-Path $testPath2) { Remove-Item $testPath2 -Force }
+          curl.exe -s -S --user "$env:FTP_USERNAME`:$env:FTP_PASSWORD" "ftp://$env:FTP_SERVER/public_html/td-portable-win-x64-7.2.9.zip" -o $testPath2
+          if ((Test-Path $testPath2) -and ((Get-Item $testPath2).Length -gt 1000)) {
+              Write-Host "SUCCESS: File found at /public_html! Size: $((Get-Item $testPath2).Length) bytes"
+          } else {
+              Write-Host "FAILED: File not found at /public_html."
+          }
+          Remove-Item $testPath2 -Force -ErrorAction SilentlyContinue
+
+          Write-Host ""
+          Write-Host "=== 6. Trying with username@source-store.ir format ==="
+          $testPath3 = "$env:TEMP\test-download3.zip"
+          if (Test-Path $testPath3) { Remove-Item $testPath3 -Force }
+          curl.exe -s -S --user "$($env:FTP_USERNAME)@source-store.ir`:$env:FTP_PASSWORD" "ftp://$env:FTP_SERVER/public_html/td-portable-win-x64-7.2.9.zip" -o $testPath3
+          if ((Test-Path $testPath3) -and ((Get-Item $testPath3).Length -gt 1000)) {
+              Write-Host "SUCCESS: File found with username@domain format! Size: $((Get-Item $testPath3).Length) bytes"
+          } else {
+              Write-Host "FAILED: File not found with username@domain format."
+          }
+          Remove-Item $testPath3 -Force -ErrorAction SilentlyContinue
+
+          Write-Host ""
+          Write-Host "=========================================="
+          Write-Host "DEBUG COMPLETE"
+          Write-Host "=========================================="
+
       - name: Download Telegram Portable from FTP
         shell: powershell
         env:
@@ -87,21 +163,37 @@ jobs:
           $ErrorActionPreference = "Continue"
           $telegramDir = "C:\Telegram"
           $zipPath = "$env:TEMP\td-portable-win-x64-7.2.9.zip"
-          $ftpUrl = "ftp://$env:FTP_SERVER/public_html/td-portable-win-x64-7.2.9.zip"
 
-          Write-Host "Downloading Telegram Portable from FTP..."
-          Write-Host "URL: $ftpUrl"
-          curl.exe -s -S --connect-timeout 15 --max-time 600 --user "$env:FTP_USERNAME`:$env:FTP_PASSWORD" -o $zipPath $ftpUrl
+          $paths = @(
+              "ftp://$env:FTP_SERVER/td-portable-win-x64-7.2.9.zip",
+              "ftp://$env:FTP_SERVER/public_html/td-portable-win-x64-7.2.9.zip",
+              "ftp://$env:FTP_SERVER/downloads/td-portable-win-x64-7.2.9.zip",
+              "ftp://$env:FTP_SERVER/public_html/downloads/td-portable-win-x64-7.2.9.zip"
+          )
 
-          if ((Test-Path $zipPath) -and ((Get-Item $zipPath).Length -gt 1000000)) {
-              Write-Host "Telegram package downloaded. Size: $([math]::Round((Get-Item $zipPath).Length / 1MB, 2)) MB"
+          $downloaded = $false
+          foreach ($ftpUrl in $paths) {
+              if ($downloaded) { break }
+              Write-Host "Trying: $ftpUrl"
+              if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
+              curl.exe -s -S --connect-timeout 15 --max-time 600 --user "$env:FTP_USERNAME`:$env:FTP_PASSWORD" -o $zipPath $ftpUrl
+              if ((Test-Path $zipPath) -and ((Get-Item $zipPath).Length -gt 1000000)) {
+                  Write-Host "SUCCESS: Downloaded from $ftpUrl"
+                  $downloaded = $true
+              } else {
+                  Write-Host "FAILED at this path."
+              }
+          }
+
+          if ($downloaded) {
+              Write-Host "Extracting Telegram..."
               if (Test-Path $telegramDir) { Remove-Item -Path $telegramDir -Recurse -Force }
               New-Item -Path $telegramDir -ItemType Directory -Force | Out-Null
               Expand-Archive -Path $zipPath -DestinationPath $telegramDir -Force
               Remove-Item -Path $zipPath -Force
               Write-Host "Telegram extracted to $telegramDir"
           } else {
-              Write-Host "::error::Failed to download Telegram package from FTP. Check if file exists at /public_html/td-portable-win-x64-7.2.9.zip"
+              Write-Host "::error::Failed to download Telegram package from any path."
               exit 1
           }
 
@@ -116,20 +208,33 @@ jobs:
           $telegramDir = "C:\Telegram"
           $tdataDir = "$telegramDir\tdata"
           $tdataZip = "$env:TEMP\tdata-backup.zip"
-          $ftpUrl = "ftp://$env:FTP_SERVER/public_html/tdata-backup.zip"
 
-          Write-Host "Checking for Tdata backup on FTP..."
-          curl.exe -s -S --connect-timeout 15 --max-time 300 --user "$env:FTP_USERNAME`:$env:FTP_PASSWORD" -o $tdataZip $ftpUrl
+          $paths = @(
+              "ftp://$env:FTP_SERVER/tdata-backup.zip",
+              "ftp://$env:FTP_SERVER/public_html/tdata-backup.zip"
+          )
 
-          if ((Test-Path $tdataZip) -and ((Get-Item $tdataZip).Length -gt 1000)) {
-              Write-Host "Tdata backup found. Restoring..."
+          $found = $false
+          foreach ($ftpUrl in $paths) {
+              if ($found) { break }
+              Write-Host "Checking: $ftpUrl"
+              if (Test-Path $tdataZip) { Remove-Item $tdataZip -Force }
+              curl.exe -s -S --connect-timeout 15 --max-time 300 --user "$env:FTP_USERNAME`:$env:FTP_PASSWORD" -o $tdataZip $ftpUrl
+              if ((Test-Path $tdataZip) -and ((Get-Item $tdataZip).Length -gt 1000)) {
+                  Write-Host "Found Tdata backup at: $ftpUrl"
+                  $found = $true
+              }
+          }
+
+          if ($found) {
+              Write-Host "Restoring Tdata..."
               if (Test-Path $tdataDir) { Remove-Item -Path $tdataDir -Recurse -Force }
               Expand-Archive -Path $tdataZip -DestinationPath $tdataDir -Force
               Remove-Item -Path $tdataZip -Force
-              Write-Host "Tdata restored successfully. Login will be preserved."
+              Write-Host "Tdata restored. Login preserved."
           } else {
-              Write-Host "No Tdata backup found. Fresh Telegram will start without login."
-              if (Test-Path $tdataZip) { Remove-Item -Path $tdataZip -Force }
+              Write-Host "No Tdata backup found."
+              if (Test-Path $tdataZip) { Remove-Item $tdataZip -Force }
           }
 
       - name: Create Telegram Desktop Shortcut
@@ -214,14 +319,22 @@ jobs:
           $zipSizeMB = [math]::Round((Get-Item $zipPath).Length / 1MB, 2)
           Write-Host "Tdata backup size: $zipSizeMB MB"
 
-          $ftpUrl = "ftp://$env:FTP_SERVER/public_html/tdata-backup.zip"
-          Write-Host "Uploading Tdata backup to FTP..."
-          curl.exe -s -S --connect-timeout 15 --max-time 600 --user "$env:FTP_USERNAME`:$env:FTP_PASSWORD" -T $zipPath $ftpUrl
+          $uploadPaths = @(
+              "ftp://$env:FTP_SERVER/tdata-backup.zip",
+              "ftp://$env:FTP_SERVER/public_html/tdata-backup.zip"
+          )
 
-          if ($LASTEXITCODE -eq 0) {
-              Write-Host "Tdata backup uploaded successfully."
-          } else {
-              Write-Host "FTP upload failed with exit code $LASTEXITCODE"
+          $uploaded = $false
+          foreach ($ftpUrl in $uploadPaths) {
+              if ($uploaded) { break }
+              Write-Host "Trying to upload to: $ftpUrl"
+              curl.exe -s -S --connect-timeout 15 --max-time 600 --user "$env:FTP_USERNAME`:$env:FTP_PASSWORD" -T $zipPath $ftpUrl
+              if ($LASTEXITCODE -eq 0) {
+                  Write-Host "SUCCESS: Uploaded to $ftpUrl"
+                  $uploaded = $true
+              } else {
+                  Write-Host "FAILED to upload to $ftpUrl (exit code: $LASTEXITCODE)"
+              }
           }
 
           Remove-Item -Path $zipPath -Force -ErrorAction SilentlyContinue
