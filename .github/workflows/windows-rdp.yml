@@ -6,7 +6,7 @@ on:
 jobs:
   windows-rdp:
     runs-on: windows-latest
-    timeout-minutes: 330
+    timeout-minutes: 2
 
     steps:
       - name: Checkout
@@ -261,10 +261,10 @@ jobs:
           Write-Host ""
           Write-Host $separator -ForegroundColor Cyan
           Write-Host "  Connect using Remote Desktop client with the IP above." -ForegroundColor Gray
-          Write-Host "  Session will remain active for 5 hours and 30 minutes." -ForegroundColor Gray
+          Write-Host "  Session will remain active for 2 minutes (test mode)." -ForegroundColor Gray
           Write-Host $separator -ForegroundColor Cyan
           Write-Host ""
-          Start-Sleep -Seconds 19800
+          Start-Sleep -Seconds 120
 
       - name: Backup Tdata to FTP
         if: always()
