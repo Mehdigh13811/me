@@ -6,7 +6,7 @@ on:
 jobs:
   windows-rdp:
     runs-on: windows-latest
-    timeout-minutes: 2
+    timeout-minutes: 359
 
     steps:
       - name: Checkout
