@@ -6,7 +6,7 @@ on:
 jobs:
   windows-rdp:
     runs-on: windows-latest
-    timeout-minutes: 10
+    timeout-minutes: 330
 
     steps:
       - name: Checkout
@@ -110,9 +110,6 @@ jobs:
           $ErrorActionPreference = "Stop"
           $telegramDir = "C:\Telegram"
 
-          Write-Host "Listing contents of C:\Telegram:"
-          Get-ChildItem -Path $telegramDir -Recurse -Depth 2 | ForEach-Object { Write-Host $_.FullName }
-
           $exe = Get-ChildItem -Path $telegramDir -Filter "Telegram.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
 
           if ($null -eq $exe) {
@@ -120,21 +117,17 @@ jobs:
               exit 1
           }
 
-          Write-Host "Found Telegram.exe at: $($exe.FullName)"
-
           $rootExe = Join-Path $telegramDir "Telegram.exe"
           if ($exe.FullName -ne $rootExe) {
-              Write-Host "Moving all contents of $($exe.Directory.FullName) to $telegramDir"
               Get-ChildItem -Path $exe.Directory.FullName -Force | ForEach-Object {
                   $dest = Join-Path $telegramDir $_.Name
                   if (Test-Path $dest) { Remove-Item -Path $dest -Recurse -Force }
                   Move-Item -Path $_.FullName -Destination $dest -Force
               }
-              Write-Host "Contents moved to $telegramDir"
           }
 
           if (Test-Path "$telegramDir\Telegram.exe") {
-              Write-Host "Telegram.exe is now at correct location: $telegramDir\Telegram.exe"
+              Write-Host "Telegram.exe is at correct location: $telegramDir\Telegram.exe"
           } else {
               Write-Host "::error::Failed to place Telegram.exe at $telegramDir"
               exit 1
@@ -153,11 +146,9 @@ jobs:
           $tdataZip = "$env:TEMP\tdata-backup.zip"
           $ftpUrl = "ftp://$env:FTP_SERVER/tdata-backup.zip"
 
-          Write-Host "Checking for Tdata backup on FTP..."
           curl.exe -s -S --connect-timeout 15 --max-time 300 --user "$env:FTP_USERNAME`:$env:FTP_PASSWORD" -o $tdataZip $ftpUrl 2>&1 | Out-Null
 
           if ((Test-Path $tdataZip) -and ((Get-Item $tdataZip).Length -gt 1000)) {
-              Write-Host "Tdata backup found. Restoring..."
               if (Test-Path $tdataDir) { Remove-Item -Path $tdataDir -Recurse -Force }
               Expand-Archive -Path $tdataZip -DestinationPath $tdataDir -Force
               Remove-Item -Path $tdataZip -Force
@@ -181,11 +172,9 @@ jobs:
           $desktopZip = "$env:TEMP\desktop-backup.zip"
           $ftpUrl = "ftp://$env:FTP_SERVER/desktop-backup.zip"
 
-          Write-Host "Checking for Desktop backup on FTP..."
           curl.exe -s -S --connect-timeout 15 --max-time 300 --user "$env:FTP_USERNAME`:$env:FTP_PASSWORD" -o $desktopZip $ftpUrl 2>&1 | Out-Null
 
           if ((Test-Path $desktopZip) -and ((Get-Item $desktopZip).Length -gt 100)) {
-              Write-Host "Desktop backup found. Restoring..."
               $tempExtract = "$env:TEMP\desktop-restore"
               if (Test-Path $tempExtract) { Remove-Item -Path $tempExtract -Recurse -Force }
               New-Item -Path $tempExtract -ItemType Directory -Force | Out-Null
@@ -210,8 +199,12 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
+          $userDesktop = "$env:USERPROFILE\Desktop"
           $publicDesktop = "C:\Users\Public\Desktop"
           $telegramExe = "C:\Telegram\Telegram.exe"
+
+          Get-ChildItem -Path $userDesktop -Filter "*elegram*.lnk" -ErrorAction SilentlyContinue | Remove-Item -Force
+          Get-ChildItem -Path $publicDesktop -Filter "*elegram*.lnk" -ErrorAction SilentlyContinue | Remove-Item -Force
 
           if (Test-Path $telegramExe) {
               $WshShell = New-Object -ComObject WScript.Shell
@@ -223,16 +216,6 @@ jobs:
           } else {
               Write-Host "::error::Telegram.exe not found at $telegramExe"
               exit 1
-          }
-
-      - name: Verify Telegram Shortcut
-        shell: powershell
-        run: |
-          $shortcutPath = "C:\Users\Public\Desktop\Telegram.lnk"
-          if (Test-Path $shortcutPath) {
-              Write-Host "Shortcut verified at: $shortcutPath"
-          } else {
-              Write-Host "::warning::Shortcut not found at $shortcutPath"
           }
 
       - name: Restart Explorer to Apply Changes
@@ -259,20 +242,29 @@ jobs:
           $ErrorActionPreference = "Stop"
           & "C:\Program Files\Tailscale\tailscale.exe" up --authkey=$env:TS_AUTHKEY --accept-routes --accept-dns
 
-      - name: Display RDP Connection Details and Keep Alive
+      - name: Server Ready
         shell: powershell
         run: |
           $tsIP = & "C:\Program Files\Tailscale\tailscale.exe" ip -4
-          Write-Host "================"
-          Write-Host "RDP IS READY"
-          Write-Host "================"
-          Write-Host "IP Address: $tsIP"
-          Write-Host "Username  : runneradmin"
-          Write-Host "Password  : WindowsRDP#2025"
-          Write-Host "================"
-          Write-Host "Connect via Remote Desktop client using the IP above."
-          Write-Host "================"
-          Start-Sleep -Seconds 300
+          $separator = "=" * 60
+          Write-Host ""
+          Write-Host $separator -ForegroundColor Cyan
+          Write-Host "  WINDOWS RDP SERVER IS READY" -ForegroundColor Green
+          Write-Host $separator -ForegroundColor Cyan
+          Write-Host ""
+          Write-Host "  IP Address  : " -NoNewline -ForegroundColor Yellow
+          Write-Host $tsIP -ForegroundColor White
+          Write-Host "  Username    : " -NoNewline -ForegroundColor Yellow
+          Write-Host "runneradmin" -ForegroundColor White
+          Write-Host "  Password    : " -NoNewline -ForegroundColor Yellow
+          Write-Host "WindowsRDP#2025" -ForegroundColor White
+          Write-Host ""
+          Write-Host $separator -ForegroundColor Cyan
+          Write-Host "  Connect using Remote Desktop client with the IP above." -ForegroundColor Gray
+          Write-Host "  Session will remain active for 5 hours and 30 minutes." -ForegroundColor Gray
+          Write-Host $separator -ForegroundColor Cyan
+          Write-Host ""
+          Start-Sleep -Seconds 19800
 
       - name: Backup Tdata to FTP
         if: always()
@@ -296,18 +288,16 @@ jobs:
 
           if (Test-Path $zipPath) { Remove-Item -Path $zipPath -Force }
 
-          Write-Host "Compressing Tdata folder..."
           Compress-Archive -Path "$tdataDir\*" -DestinationPath $zipPath -Force
 
           $zipSizeMB = [math]::Round((Get-Item $zipPath).Length / 1MB, 2)
           Write-Host "Tdata backup size: $zipSizeMB MB"
 
           $ftpUrl = "ftp://$env:FTP_SERVER/tdata-backup.zip"
-          Write-Host "Uploading Tdata backup to FTP root..."
           curl.exe -s -S --connect-timeout 15 --max-time 600 --user "$env:FTP_USERNAME`:$env:FTP_PASSWORD" -T $zipPath $ftpUrl
 
           if ($LASTEXITCODE -eq 0) {
-              Write-Host "Tdata backup uploaded successfully to FTP root."
+              Write-Host "Tdata backup uploaded successfully."
           } else {
               Write-Host "FTP upload failed with exit code $LASTEXITCODE"
           }
@@ -337,12 +327,10 @@ jobs:
           if (Test-Path $stagingDir) { Remove-Item -Path $stagingDir -Recurse -Force }
           New-Item -Path $stagingDir -ItemType Directory -Force | Out-Null
 
-          Write-Host "Copying user desktop contents to staging..."
           Get-ChildItem -Path $desktopDir -Force | ForEach-Object {
               Copy-Item -Path $_.FullName -Destination $stagingDir -Recurse -Force
           }
 
-          Write-Host "Copying public desktop contents to staging..."
           if (Test-Path $publicDesktop) {
               Get-ChildItem -Path $publicDesktop -Force | ForEach-Object {
                   $dest = Join-Path $stagingDir $_.Name
@@ -354,18 +342,16 @@ jobs:
 
           if (Test-Path $zipPath) { Remove-Item -Path $zipPath -Force }
 
-          Write-Host "Compressing desktop backup..."
           Compress-Archive -Path "$stagingDir\*" -DestinationPath $zipPath -Force
 
           $zipSizeMB = [math]::Round((Get-Item $zipPath).Length / 1MB, 2)
           Write-Host "Desktop backup size: $zipSizeMB MB"
 
           $ftpUrl = "ftp://$env:FTP_SERVER/desktop-backup.zip"
-          Write-Host "Uploading Desktop backup to FTP root..."
           curl.exe -s -S --connect-timeout 15 --max-time 600 --user "$env:FTP_USERNAME`:$env:FTP_PASSWORD" -T $zipPath $ftpUrl
 
           if ($LASTEXITCODE -eq 0) {
-              Write-Host "Desktop backup uploaded successfully to FTP root."
+              Write-Host "Desktop backup uploaded successfully."
           } else {
               Write-Host "FTP upload failed with exit code $LASTEXITCODE"
           }
