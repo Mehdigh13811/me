@@ -100,7 +100,7 @@ jobs:
               Remove-Item -Path $zipPath -Force
               Write-Host "Telegram extracted to $telegramDir"
           } else {
-              Write-Host "::error::Failed to download tel.zip from FTP root. Check file location."
+              Write-Host "::error::Failed to download tel.zip from FTP root."
               exit 1
           }
 
@@ -118,7 +118,7 @@ jobs:
           $ftpUrl = "ftp://$env:FTP_SERVER/tdata-backup.zip"
 
           Write-Host "Checking for Tdata backup on FTP..."
-          curl.exe -s -S --connect-timeout 15 --max-time 300 --user "$env:FTP_USERNAME`:$env:FTP_PASSWORD" -o $tdataZip $ftpUrl
+          curl.exe -s -S --connect-timeout 15 --max-time 300 --user "$env:FTP_USERNAME`:$env:FTP_PASSWORD" -o $tdataZip $ftpUrl 2>&1 | Out-Null
 
           if ((Test-Path $tdataZip) -and ((Get-Item $tdataZip).Length -gt 1000)) {
               Write-Host "Tdata backup found. Restoring..."
@@ -130,6 +130,8 @@ jobs:
               Write-Host "No Tdata backup found. Fresh Telegram will start."
               if (Test-Path $tdataZip) { Remove-Item -Path $tdataZip -Force }
           }
+
+          exit 0
 
       - name: Create Telegram Desktop Shortcut
         shell: powershell
@@ -222,3 +224,4 @@ jobs:
           }
 
           Remove-Item -Path $zipPath -Force -ErrorAction SilentlyContinue
+          exit 0
